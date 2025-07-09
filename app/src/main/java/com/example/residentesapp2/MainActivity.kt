@@ -5,10 +5,13 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.widget.ImageView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,20 +28,16 @@ import androidx.navigation.compose.rememberNavController
 import com.example.residentesapp2.ui.theme.ResidentesApp2Theme
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import android.graphics.Color as AndroidColor
-import androidx.compose.ui.graphics.Color
-import java.time.LocalDate
-import androidx.core.content.FileProvider
-import android.widget.Toast
-import java.io.File
-import java.io.FileOutputStream
-import kotlinx.serialization.*
-import kotlinx.serialization.json.*
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlinx.serialization.Serializable
+import java.time.LocalDate
+import android.graphics.Color as AndroidColor
+import android.util.Log
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +75,9 @@ fun QRCode(data: String, modifier: Modifier = Modifier) {
 fun LoginScreen(navController: NavHostController) {
     var id by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -85,9 +87,9 @@ fun LoginScreen(navController: NavHostController) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Bienvenido",
+            text = "Acceso a la App",
             style = MaterialTheme.typography.headlineMedium,
-            color = Color.Black
+            color = ComposeColor.Black
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -95,9 +97,10 @@ fun LoginScreen(navController: NavHostController) {
         OutlinedTextField(
             value = id,
             onValueChange = { id = it },
-            label = { Text("ID", color = Color.Black) },
+            label = { Text("ID", color = ComposeColor.Black) },
             modifier = Modifier.fillMaxWidth(),
-            textStyle = LocalTextStyle.current.copy(color = Color.Black)
+            textStyle = LocalTextStyle.current.copy(color = ComposeColor.Black),
+            enabled = !isLoading
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -105,35 +108,49 @@ fun LoginScreen(navController: NavHostController) {
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Contraseña", color = Color.Black) },
+            label = { Text("Contraseña", color = ComposeColor.Black) },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
-            textStyle = LocalTextStyle.current.copy(color = Color.Black)
+            textStyle = LocalTextStyle.current.copy(color = ComposeColor.Black),
+            enabled = !isLoading
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = {
-                navController.navigate("home/$id")
+                if (id.isNotBlank() && password.isNotBlank()) {
+                    isLoading = true
+                    coroutineScope.launch {
+                        val result = ApiService.loginResidente(id, password)
+                        isLoading = false
+
+                        if (result != null) {
+                            // Codifica el objeto como JSON para pasarlo por la ruta
+                            val residentJson = Json.encodeToString(result)
+                            navController.navigate("home/${Uri.encode(residentJson)}")
+                        } else {
+                            Toast.makeText(context, "ID o contraseña incorrectos", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    Toast.makeText(context, "Ingresa ID y contraseña", Toast.LENGTH_SHORT).show()
+                }
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
         ) {
-            Text("Iniciar sesión")
+            if (isLoading) {
+                CircularProgressIndicator(color = ComposeColor.White, modifier = Modifier.size(24.dp))
+            } else {
+                Text("Iniciar sesión")
+            }
         }
     }
 }
 
 @Composable
-fun HomeScreen(userId: String, navController: NavHostController) {
-    val user = remember {
-        // Simulación hasta conectar al backend
-        when (userId) {
-            "123" -> Resident("123", "Juan", "Pérez", "Calle Falsa 123", "555-1234", "RES005")
-            else -> Resident("000", "Desconocido", "Desconocido", "Sin domicilio", "000-0000", "QR000")
-        }
-    }
-
+fun HomeScreen(user: Resident, navController: NavHostController) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -141,15 +158,15 @@ fun HomeScreen(userId: String, navController: NavHostController) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("ID: ${user.id}", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
-        Text("Nombre: ${user.nombre}", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
-        Text("Apellidos: ${user.apellidos}", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
-        Text("Domicilio: ${user.domicilio}", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
-        Text("Teléfono: ${user.telefono}", style = MaterialTheme.typography.bodyLarge, color = Color.Black)
+        Text("ID: ${user.id}", style = MaterialTheme.typography.bodyLarge, color = ComposeColor.Black)
+        Text("Nombre: ${user.nombre}", style = MaterialTheme.typography.bodyLarge, color = ComposeColor.Black)
+        Text("Apellidos: ${user.apellidos}", style = MaterialTheme.typography.bodyLarge, color = ComposeColor.Black)
+        Text("Domicilio: ${user.domicilio}", style = MaterialTheme.typography.bodyLarge, color = ComposeColor.Black)
+        Text("Teléfono: ${user.telefono}", style = MaterialTheme.typography.bodyLarge, color = ComposeColor.Black)
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Text("Código QR del residente:", style = MaterialTheme.typography.titleLarge, color = Color.Black)
+        Text("Código QR del residente:", style = MaterialTheme.typography.titleLarge, color = ComposeColor.Black)
         Spacer(modifier = Modifier.height(16.dp))
         QRCode(data = user.codigoQR)
 
@@ -171,9 +188,10 @@ fun AppNavigation() {
 
     NavHost(navController = navController, startDestination = "login") {
         composable("login") { LoginScreen(navController) }
-        composable("home/{userId}") { backStackEntry ->
-            val userId = backStackEntry.arguments?.getString("userId") ?: ""
-            HomeScreen(userId, navController)
+        composable("home/{residentJson}") { backStackEntry ->
+            val residentJson = backStackEntry.arguments?.getString("residentJson") ?: ""
+            val user = Json.decodeFromString<Resident>(Uri.decode(residentJson))
+            HomeScreen(user, navController)
         }
         composable("vehicles/{userId}") { backStackEntry ->
             val userId = backStackEntry.arguments?.getString("userId") ?: ""
@@ -201,19 +219,20 @@ data class Resident(
     val apellidos: String,
     val domicilio: String,
     val telefono: String,
-    val codigoQR: String
+    val codigoQR: String,
+    val contrasena: String? = null  // <- agrega este campo
 )
 
 @Composable
 fun VehicleScreen(userId: String, navController: NavHostController) {
-    val vehicleList = remember {
-        when (userId) {
-            "123" -> listOf(
-                Vehicle("V001", "Toyota", "Corolla", "ABC-123", "123"),
-                Vehicle("V002", "Honda", "Civic", "XYZ-789", "123")
-            )
-            else -> emptyList()
-        }
+    val coroutineScope = rememberCoroutineScope()
+    var vehicleList by remember { mutableStateOf<List<Vehicle>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(userId) {
+        isLoading = true
+        vehicleList = ApiService.obtenerVehiculos(userId)
+        isLoading = false
     }
 
     Column(
@@ -222,22 +241,29 @@ fun VehicleScreen(userId: String, navController: NavHostController) {
             .padding(24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Vehículos del usuario $userId", style = MaterialTheme.typography.titleLarge, color = Color.Black)
+        Text("Vehículos del usuario $userId", style = MaterialTheme.typography.titleLarge, color = ComposeColor.Black)
 
         Spacer(modifier = Modifier.height(16.dp))
-        if (vehicleList.isEmpty()) {
-            Text("No hay vehículos registrados.", color = Color.Black)
+
+        if (isLoading) {
+            CircularProgressIndicator()
         } else {
-            vehicleList.forEach { vehicle ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    elevation = CardDefaults.cardElevation(4.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("ID: ${vehicle.id}", color = Color.Black)
-                        Text("Marca: ${vehicle.marca}", color = Color.Black)
-                        Text("Modelo: ${vehicle.modelo}", color = Color.Black)
-                        Text("Placas: ${vehicle.placas}", color = Color.Black)
+            if (vehicleList.isEmpty()) {
+                Text("No hay vehículos registrados.", color = ComposeColor.Black)
+            } else {
+                vehicleList.forEach { vehicle ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        elevation = CardDefaults.cardElevation(4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("ID: ${vehicle.id}", color = ComposeColor.Black)
+                            Text("Marca: ${vehicle.marca}", color = ComposeColor.Black)
+                            Text("Modelo: ${vehicle.modelo}", color = ComposeColor.Black)
+                            Text("Placas: ${vehicle.placas}", color = ComposeColor.Black)
+                        }
                     }
                 }
             }
@@ -268,27 +294,70 @@ fun AddVehicleScreen(userId: String, navController: NavHostController) {
     var marca by remember { mutableStateOf("") }
     var modelo by remember { mutableStateOf("") }
     var placas by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         verticalArrangement = Arrangement.Top
     ) {
-        Text("Agregar vehículo para $userId", style = MaterialTheme.typography.titleLarge, color = Color.Black)
+        Text("Agregar vehículo para $userId", style = MaterialTheme.typography.titleLarge, color = ComposeColor.Black)
 
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = marca, onValueChange = { marca = it }, label = { Text("Marca", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = marca,
+            onValueChange = { marca = it },
+            label = { Text("Marca", color = ComposeColor.Black) },
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = modelo, onValueChange = { modelo = it }, label = { Text("Modelo", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = modelo,
+            onValueChange = { modelo = it },
+            label = { Text("Modelo", color = ComposeColor.Black) },
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = placas, onValueChange = { placas = it }, label = { Text("Placas", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = placas,
+            onValueChange = { placas = it },
+            label = { Text("Placas", color = ComposeColor.Black) },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = {
-            val generatedId = "VEH_${System.currentTimeMillis()}"
-            println("Nuevo vehículo: $generatedId, $marca $modelo $placas")
-            navController.popBackStack()
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("Guardar")
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    isSaving = true
+                    val newVehicle = Vehicle(
+                        id = "VEH_${System.currentTimeMillis()}",
+                        marca = marca,
+                        modelo = modelo,
+                        placas = placas,
+                        residenteId = userId
+                    )
+                    val success = ApiService.agregarVehiculo(newVehicle)
+                    isSaving = false
+                    if (success) {
+                        Toast.makeText(context, "Vehículo agregado", Toast.LENGTH_SHORT).show()
+                        navController.popBackStack()
+                    } else {
+                        Toast.makeText(context, "Error al guardar", Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSaving
+        ) {
+            if (isSaving) {
+                CircularProgressIndicator(color = ComposeColor.White, modifier = Modifier.size(24.dp))
+            } else {
+                Text("Guardar")
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -300,15 +369,13 @@ fun AddVehicleScreen(userId: String, navController: NavHostController) {
 
 @Composable
 fun GuestScreen(userId: String, navController: NavHostController) {
-    val guestList = remember {
-        when (userId) {
-            "123" -> listOf(
-                Guest("G001", "Carlos", "Ramírez", "Permanente", "2025-01-01", null, "123"),
-                Guest("G002", "Ana", "López", "Temporal", "2025-07-01", "2025-07-10", "123"),
-                Guest("G003", "Luis", "Martínez", "Temporal", "2025-06-01", "2025-07-01", "123")
-            )
-            else -> emptyList()
-        }
+    var guestList by remember { mutableStateOf<List<Guest>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(userId) {
+        isLoading = true
+        guestList = ApiService.obtenerInvitados(userId)
+        isLoading = false
     }
 
     Column(
@@ -317,37 +384,43 @@ fun GuestScreen(userId: String, navController: NavHostController) {
             .padding(24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text("Invitados de $userId", style = MaterialTheme.typography.titleLarge, color = Color.Black)
+        Text("Invitados de $userId", style = MaterialTheme.typography.titleLarge, color = ComposeColor.Black)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (guestList.isEmpty()) {
-            Text("No hay invitados registrados.", color = Color.Black)
+        if (isLoading) {
+            CircularProgressIndicator()
         } else {
-            guestList.forEach { guest ->
-                val backgroundColor = when (guest.tipoInvitacion) {
-                    "Permanente" -> Color(0xFF2196F3)
-                    "Temporal" -> {
-                        val today = LocalDate.now()
-                        val fin = guest.fechaFin?.let { LocalDate.parse(it) }
-                        if (fin != null && today.isAfter(fin)) Color(0xFFF44336) else Color(0xFF4CAF50)
+            if (guestList.isEmpty()) {
+                Text("No hay invitados registrados.", color = ComposeColor.Black)
+            } else {
+                guestList.forEach { guest ->
+                    val backgroundColor = when (guest.tipoInvitacion) {
+                        "Permanente" -> ComposeColor(0xFF2196F3)
+                        "Temporal" -> {
+                            val today = LocalDate.now()
+                            val fin = guest.fechaFin?.let { LocalDate.parse(it) }
+                            if (fin != null && today.isAfter(fin)) ComposeColor(0xFFF44336) else ComposeColor(0xFF4CAF50)
+                        }
+                        else -> ComposeColor.LightGray
                     }
-                    else -> Color.LightGray
-                }
 
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = backgroundColor),
-                    elevation = CardDefaults.cardElevation(4.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("ID: ${guest.id}", color = Color.White)
-                        Text("Nombre: ${guest.nombre} ${guest.apellidos}", color = Color.White)
-                        Text("Tipo: ${guest.tipoInvitacion}", color = Color.White)
-                        guest.fechaInicio?.let { Text("Desde: $it", color = Color.White) }
-                        guest.fechaFin?.let { Text("Hasta: $it", color = Color.White) }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        QRCode(data = "INV-${guest.id}")
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+                        elevation = CardDefaults.cardElevation(4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("ID: ${guest.id}", color = ComposeColor.White)
+                            Text("Nombre: ${guest.nombre} ${guest.apellidos}", color = ComposeColor.White)
+                            Text("Tipo: ${guest.tipoInvitacion}", color = ComposeColor.White)
+                            guest.fechaInicio?.let { Text("Desde: $it", color = ComposeColor.White) }
+                            guest.fechaFin?.let { Text("Hasta: $it", color = ComposeColor.White) }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            QRCode(data = "INV-${guest.id}")
+                        }
                     }
                 }
             }
@@ -385,37 +458,88 @@ fun AddGuestScreen(userId: String, navController: NavHostController) {
     var fechaFin by remember { mutableStateOf("") }
 
     val mostrarFechas = tipoInvitacion == "Temporal"
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         verticalArrangement = Arrangement.Top
     ) {
-        Text("Agregar invitado para $userId", style = MaterialTheme.typography.titleLarge, color = Color.Black)
+        Text("Agregar invitado para $userId", style = MaterialTheme.typography.titleLarge, color = ComposeColor.Black)
 
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = nombre, onValueChange = { nombre = it }, label = { Text("Nombre", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = nombre,
+            onValueChange = { nombre = it },
+            label = { Text("Nombre", color = ComposeColor.Black) },
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = apellidos, onValueChange = { apellidos = it }, label = { Text("Apellidos", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = apellidos,
+            onValueChange = { apellidos = it },
+            label = { Text("Apellidos", color = ComposeColor.Black) },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Tipo de invitación: ", color = Color.Black)
+            Text("Tipo de invitación: ", color = ComposeColor.Black)
             Spacer(modifier = Modifier.width(16.dp))
             DropdownMenuTipoInvitacion(tipoActual = tipoInvitacion, onTipoSelected = { tipoInvitacion = it })
         }
 
         if (mostrarFechas) {
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(value = fechaInicio, onValueChange = { fechaInicio = it }, label = { Text("Fecha inicio (YYYY-MM-DD)", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = fechaInicio,
+                onValueChange = { fechaInicio = it },
+                label = { Text("Fecha inicio (YYYY-MM-DD)", color = ComposeColor.Black) },
+                modifier = Modifier.fillMaxWidth()
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(value = fechaFin, onValueChange = { fechaFin = it }, label = { Text("Fecha fin (YYYY-MM-DD)", color = Color.Black) }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = fechaFin,
+                onValueChange = { fechaFin = it },
+                label = { Text("Fecha fin (YYYY-MM-DD)", color = ComposeColor.Black) },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = {
-            println("Nuevo invitado: $generatedId, $nombre $apellidos, $tipoInvitacion, $fechaInicio a $fechaFin")
-            navController.popBackStack()
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("Guardar")
+        Button(
+            onClick = {
+                coroutineScope.launch {
+                    isSaving = true
+                    val newGuest = Guest(
+                        id = generatedId,
+                        nombre = nombre,
+                        apellidos = apellidos,
+                        tipoInvitacion = tipoInvitacion,
+                        fechaInicio = if (mostrarFechas) fechaInicio else null,
+                        fechaFin = if (mostrarFechas) fechaFin else null,
+                        residenteId = userId
+                    )
+                    val success = ApiService.agregarInvitado(newGuest)
+                    isSaving = false
+                    if (success) {
+                        Toast.makeText(context, "Invitado agregado", Toast.LENGTH_SHORT).show()
+                        navController.popBackStack()
+                    } else {
+                        Toast.makeText(context, "Error al guardar", Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSaving
+        ) {
+            if (isSaving) {
+                CircularProgressIndicator(color = ComposeColor.White, modifier = Modifier.size(24.dp))
+            } else {
+                Text("Guardar")
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -425,42 +549,53 @@ fun AddGuestScreen(userId: String, navController: NavHostController) {
     }
 }
 
-
 object ApiService {
-    private const val BASE_URL = "http://1686d06df8db.ngrok-free.app"
+    private const val BASE_URL = "https://6b2dc6556ae7.ngrok-free.app"
 
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun loginResidente(id: String, password: String): Resident? {
-        val url = URL("$BASE_URL/residentes/login")
-        val body = Json.encodeToString(mapOf("id" to id, "password" to password))
+        val url = URL("$BASE_URL/api/Residentes/login")
+        val body = json.encodeToString(mapOf("id" to id, "password" to password))
 
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                outputStream.write(body.toByteArray())
             }
 
-            if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+            connection.outputStream.use { it.write(body.toByteArray()) }
+
+            // Logging para ver el estado del login
+            Log.d("API", "Login response: ${connection.responseCode} ${connection.responseMessage}")
+
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
                 json.decodeFromString<Resident>(response)
-            } else null
+            } else {
+                null
+            }
         } catch (e: Exception) {
+            Log.e("API", "Login error", e)
             null
         }
     }
 
     suspend fun obtenerVehiculos(userId: String): List<Vehicle> {
-        val url = URL("$BASE_URL/vehiculos/residente/$userId")
+        val url = URL("$BASE_URL/vehiculos?residenteId=$userId")
         return try {
-            val connection = (url.openConnection() as HttpURLConnection)
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+            }
+
             if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
                 json.decodeFromString(response)
             } else emptyList()
         } catch (e: Exception) {
+            e.printStackTrace()
             emptyList()
         }
     }
@@ -474,23 +609,31 @@ object ApiService {
                 requestMethod = "POST"
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                outputStream.write(body.toByteArray())
             }
+
+            connection.outputStream.use { it.write(body.toByteArray()) }
+
             connection.responseCode == 201
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 
     suspend fun obtenerInvitados(userId: String): List<Guest> {
-        val url = URL("$BASE_URL/invitados/residente/$userId")
+        val url = URL("$BASE_URL/invitados?residenteId=$userId")
         return try {
-            val connection = (url.openConnection() as HttpURLConnection)
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+            }
+
             if (connection.responseCode == 200) {
-                val response = connection.inputStream.bufferedReader().readText()
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
                 json.decodeFromString(response)
             } else emptyList()
         } catch (e: Exception) {
+            e.printStackTrace()
             emptyList()
         }
     }
@@ -504,37 +647,33 @@ object ApiService {
                 requestMethod = "POST"
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                outputStream.write(body.toByteArray())
             }
+
+            connection.outputStream.use { it.write(body.toByteArray()) }
+
             connection.responseCode == 201
         } catch (e: Exception) {
+            e.printStackTrace()
             false
         }
     }
 }
 
 @Composable
-fun DropdownMenuTipoInvitacion(
-    tipoActual: String,
-    onTipoSelected: (String) -> Unit
-) {
+fun DropdownMenuTipoInvitacion(tipoActual: String, onTipoSelected: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val tipos = listOf("Permanente", "Temporal")
+    val opciones = listOf("Permanente", "Temporal")
 
     Box {
         OutlinedButton(onClick = { expanded = true }) {
-            Text(tipoActual)
+            Text(tipoActual, color = ComposeColor.Black)
         }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            tipos.forEach { tipo ->
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            opciones.forEach { opcion ->
                 DropdownMenuItem(
-                    text = { Text(tipo) },
+                    text = { Text(opcion, color = ComposeColor.Black) },
                     onClick = {
-                        onTipoSelected(tipo)
+                        onTipoSelected(opcion)
                         expanded = false
                     }
                 )
