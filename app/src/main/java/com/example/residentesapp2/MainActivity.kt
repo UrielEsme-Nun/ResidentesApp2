@@ -1,22 +1,49 @@
 package com.example.residentesapp2
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.StrictMode
+import android.os.StrictMode.ThreadPolicy
+import android.util.Log
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -30,24 +57,29 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDate
 import android.graphics.Color as AndroidColor
-import android.util.Log
+import androidx.compose.ui.graphics.Color as ComposeColor
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val policy = ThreadPolicy.Builder().permitAll().build()
+        StrictMode.setThreadPolicy(policy)
+
         setContent {
             ResidentesApp2Theme {
                 AppNavigation()
             }
         }
+
     }
 }
 
@@ -419,7 +451,9 @@ fun GuestScreen(userId: String, navController: NavHostController) {
                             guest.fechaInicio?.let { Text("Desde: $it", color = ComposeColor.White) }
                             guest.fechaFin?.let { Text("Hasta: $it", color = ComposeColor.White) }
                             Spacer(modifier = Modifier.height(8.dp))
-                            QRCode(data = "INV-${guest.id}")
+                            guest.codigoQR?.let { qrData ->
+                                QRCode(data = qrData)
+                            }
                         }
                     }
                 }
@@ -443,9 +477,10 @@ data class Guest(
     val nombre: String,
     val apellidos: String,
     val tipoInvitacion: String,
-    val fechaInicio: String? = null,
-    val fechaFin: String? = null,
-    val residenteId: String
+    val fechaInicio: String,
+    val fechaFin: String,
+    val residenteId: String,
+    val codigoQR: String? = null
 )
 
 @Composable
@@ -518,8 +553,8 @@ fun AddGuestScreen(userId: String, navController: NavHostController) {
                         nombre = nombre,
                         apellidos = apellidos,
                         tipoInvitacion = tipoInvitacion,
-                        fechaInicio = if (mostrarFechas) fechaInicio else null,
-                        fechaFin = if (mostrarFechas) fechaFin else null,
+                        fechaInicio = if (mostrarFechas) fechaInicio else "",
+                        fechaFin = if (mostrarFechas) fechaFin else "",
                         residenteId = userId
                     )
                     val success = ApiService.agregarInvitado(newGuest)
@@ -550,13 +585,14 @@ fun AddGuestScreen(userId: String, navController: NavHostController) {
 }
 
 object ApiService {
-    private const val BASE_URL = "https://6b2dc6556ae7.ngrok-free.app"
+    private const val BASE_URL = "https://ebfa6e76180c.ngrok-free.app"
 
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun loginResidente(id: String, password: String): Resident? {
         val url = URL("$BASE_URL/api/Residentes/login")
         val body = json.encodeToString(mapOf("id" to id, "password" to password))
+
 
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -583,14 +619,15 @@ object ApiService {
     }
 
     suspend fun obtenerVehiculos(userId: String): List<Vehicle> {
-        val url = URL("$BASE_URL/vehiculos?residenteId=$userId")
+        val url = URL("$BASE_URL/api/Residentes/$userId/Vehiculos")
+
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
             }
 
-            if (connection.responseCode == 200) {
+            if (connection.responseCode == 200 || connection.responseCode == 201) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
                 json.decodeFromString(response)
             } else emptyList()
@@ -601,8 +638,11 @@ object ApiService {
     }
 
     suspend fun agregarVehiculo(vehicle: Vehicle): Boolean {
-        val url = URL("$BASE_URL/vehiculos")
+        val url = URL("$BASE_URL/api/Vehiculos/Sencillo")
         val body = json.encodeToString(vehicle)
+
+        Log.d("DEBUG_JSON", "JSON enviado: $body")
+
 
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -621,14 +661,14 @@ object ApiService {
     }
 
     suspend fun obtenerInvitados(userId: String): List<Guest> {
-        val url = URL("$BASE_URL/invitados?residenteId=$userId")
+        val url = URL("$BASE_URL/api/Residentes/$userId/Invitados")
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/json")
             }
 
-            if (connection.responseCode == 200) {
+            if (connection.responseCode == 200 || connection.responseCode == 201) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
                 json.decodeFromString(response)
             } else emptyList()
@@ -639,8 +679,10 @@ object ApiService {
     }
 
     suspend fun agregarInvitado(guest: Guest): Boolean {
-        val url = URL("$BASE_URL/invitados")
+        val url = URL("$BASE_URL/api/Invitados/Sencillo")
         val body = json.encodeToString(guest)
+
+        Log.d("DEBUG_JSON", "JSON enviado: $body")
 
         return try {
             val connection = (url.openConnection() as HttpURLConnection).apply {
